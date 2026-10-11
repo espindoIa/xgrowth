@@ -11,7 +11,7 @@ from .bandit import FeatureSpace, LinearThompson, Observation, fit_adaptive
 from .config import Config
 from .db import DB, parse_iso
 
-CONTROLS = ["log_seguidores", "fim_de_semana"]
+CONTROLS = ["log_seguidores", "fim_de_semana", "dia_de_jogo"]
 
 
 def weighted_engagement(m: dict, pesos: dict[str, float]) -> float:
@@ -25,11 +25,15 @@ def compute_reward(m: dict, cfg: Config) -> float:
     return cfg.peso_views * math.log1p(imp) + cfg.peso_engajamento * math.log1p(eng)
 
 
-def controls_for(posted_at: datetime, followers: int | None, tz: ZoneInfo) -> dict[str, float]:
+def controls_for(posted_at: datetime, followers: int | None, tz: ZoneInfo,
+                 dias_de_jogo: set[str] | frozenset[str] = frozenset()) -> dict[str, float]:
+    """Covariáveis que não escolhemos. `dia_de_jogo` evita que o efeito de um jogo (muito mais gente no X)
+    seja confundido com o efeito do horário ou do formato do post."""
     local = posted_at.astimezone(tz)
     return {
         "log_seguidores": math.log1p(max(followers or 0, 0)),
         "fim_de_semana": 1.0 if local.weekday() >= 5 else 0.0,
+        "dia_de_jogo": 1.0 if local.date().isoformat() in dias_de_jogo else 0.0,
     }
 
 
@@ -65,7 +69,7 @@ def build_observations(db: DB, cfg: Config, now: datetime) -> list[Observation]:
         }
         obs.append(Observation(
             choice={k: v for k, v in choice.items() if v is not None},
-            controls=controls_for(posted_at, p["followers_at_post"], tz),
+            controls=controls_for(posted_at, p["followers_at_post"], tz, cfg.dias_de_jogo),
             reward=compute_reward(dict(m), cfg),
             age_days=age_h / 24.0,
         ))

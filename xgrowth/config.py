@@ -89,8 +89,12 @@ class Config:
     max_respostas_dia: int = 30
     max_respostas_usuario_dia: int = 2
     opt_out: list[str] = field(default_factory=list)
-    # llm
-    modelo: str = "claude-sonnet-5-5"
+    # llm (Gemini)
+    modelo: str = "gemini-3.8-flash"
+    raciocinio: str = "low"           # thinking_level do Gemini; "" = não enviar (use em modelos sem esse ajuste)
+    # contexto do dia (opcional): fatos que o texto PODE afirmar e datas de jogo
+    fatos: list[str] = field(default_factory=list)
+    dias_de_jogo: set[str] = field(default_factory=set)   # "AAAA-MM-DD" no fuso da agenda
     # segurança
     dry_run: bool = True
     pausado: bool = False
@@ -139,6 +143,19 @@ def _as_named(items, default: dict[str, str]) -> dict[str, str]:
         else:
             raise ConfigError(f"Item inválido: {it!r}")
     return out
+
+
+def _iso_date(v) -> str:
+    """Aceita '2026-10-14' (texto) ou data do YAML e devolve 'AAAA-MM-DD'."""
+    from datetime import date, datetime
+
+    if isinstance(v, (date, datetime)):
+        return v.strftime("%Y-%m-%d")
+    s = str(v).strip()
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError:
+        raise ConfigError(f"contexto.dias_de_jogo: '{s}' não é uma data AAAA-MM-DD.") from None
 
 
 def config_from_dict(raw: dict) -> Config:
@@ -199,7 +216,12 @@ def config_from_dict(raw: dict) -> Config:
         "não me responda", "nao me responda", "me deixa em paz", "unsubscribe",
     ])]
 
-    cfg.modelo = _pick(raw, "llm", "modelo", default=cfg.modelo)
+    cfg.modelo = str(_pick(raw, "llm", "modelo", default=cfg.modelo))
+    cfg.raciocinio = str(_pick(raw, "llm", "raciocinio", default=cfg.raciocinio) or "").strip().lower()
+
+    ctx = raw.get("contexto") or {}
+    cfg.fatos = [str(f).strip() for f in (ctx.get("fatos_atuais") or []) if str(f).strip()]
+    cfg.dias_de_jogo = {_iso_date(d) for d in (ctx.get("dias_de_jogo") or [])}
 
     se = raw.get("seguranca") or {}
     cfg.dry_run = bool(se.get("dry_run", cfg.dry_run))
@@ -265,7 +287,7 @@ class Secrets:
     x_api_secret: str | None = None
     x_access_token: str | None = None
     x_access_secret: str | None = None
-    anthropic_api_key: str | None = None
+    gemini_api_key: str | None = None
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
 
@@ -298,7 +320,7 @@ def secrets_from_env() -> Secrets:
         x_api_secret=g("X_API_SECRET"),
         x_access_token=g("X_ACCESS_TOKEN"),
         x_access_secret=g("X_ACCESS_SECRET"),
-        anthropic_api_key=g("ANTHROPIC_API_KEY"),
+        gemini_api_key=g("GEMINI_API_KEY") or g("GOOGLE_API_KEY"),
         telegram_bot_token=g("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=g("TELEGRAM_CHAT_ID"),
     )

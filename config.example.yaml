@@ -67,8 +67,14 @@ respostas:
   max_por_dia: 30
   max_por_usuario_por_dia: 2
 
+# Contexto opcional: fatos que os textos podem afirmar e datas de evento que mudam o engajamento.
+# contexto:
+#   fatos_atuais: []
+#   dias_de_jogo: []   # AAAA-MM-DD (útil para esportes)
+
 llm:
-  modelo: "claude-sonnet-5-5"    # ou claude-haiku-5-5 para gastar menos
+  modelo: "gemini-3.8-flash"     # estável e com camada gratuita; alternativa mais barata: gemini-3.5-flash-lite
+  raciocinio: "low"              # nível de "pensamento" do Gemini: menor = mais barato e rápido
 
 seguranca:
   dry_run: true                  # comece em true; mude para false quando o teste estiver bom

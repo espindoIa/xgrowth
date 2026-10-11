@@ -239,3 +239,23 @@ def test_unapproved_replies_expire(make_engine, clock):
     clock.advance(hours=37)
     eng.tick()
     assert eng.db.one("SELECT status FROM mentions WHERE tweet_id='7001'")["status"] == "expired"
+
+
+def test_invented_score_is_rejected_and_game_day_reaches_prompt(make_engine, clock, cfg):
+    from conftest import FakeWriter
+    from xgrowth.writer import PostDraft
+
+    class ScoreWriter(FakeWriter):
+        def write_post(self, brief):
+            d = super().write_post(brief)
+            if not brief.feedback:
+                return PostDraft(tema="inventado", tweets=["Ganhamos de 3x1 em 1997 com sobra"])
+            return d
+
+    w = ScoreWriter()
+    eng = make_engine(writer=w, dias_de_jogo={"2026-10-12"}, fatos=[])
+    run_ticks(eng, clock, 24)
+    assert len(posted(eng)) == 4
+    assert all("3x1" not in p["text"] for p in eng.x.published)
+    assert any("placar 3x1" in f for b in w.post_calls for f in b.feedback)
+    assert all(b.dia_de_jogo for b in w.post_calls)

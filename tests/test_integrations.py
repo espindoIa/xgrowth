@@ -1,16 +1,13 @@
-"""Testa os clientes reais (X e Claude) contra respostas HTTP simuladas — valida o formato
+"""Testa os clientes reais (X e Gemini) contra respostas HTTP simuladas — valida o formato
 das requisições e a leitura das respostas sem gastar créditos."""
 import json
 from datetime import datetime, timezone
 
 import pytest
 
-try:  # versões recentes do SDK da Anthropic usam o pacote httpx2
-    import httpx2 as httpx
-except ImportError:  # pragma: no cover
-    import httpx
+import httpx
 
-from xgrowth.writer import ClaudeWriter, PostBrief, ReplyBrief
+from xgrowth.writer import GeminiWriter, PostBrief, ReplyBrief, parse_json_reply
 from xgrowth.x_client import XClient, XError
 
 
@@ -90,41 +87,74 @@ def test_x_errors_are_explained(x):
     assert e.value.status == 429
 
 
-def _claude_with(handler, cfg):
-    w = ClaudeWriter(cfg, "sk-test")
-    import anthropic
-    w.client = anthropic.Anthropic(api_key="sk-test", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
-    return w
+def _gemini_with(handler, cfg):
+    """GeminiWriter com o SDK oficial de verdade, mas falando com um servidor HTTP simulado."""
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key="k-test", http_options=types.HttpOptions(
+        httpx_client=httpx.Client(transport=httpx.MockTransport(handler))))
+    return GeminiWriter(cfg, "k-test", client=client)
 
 
-def _tool_msg(name, data):
-    return {
-        "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
-        "content": [{"type": "tool_use", "id": "tu_1", "name": name, "input": data}],
-        "stop_reason": "tool_use", "stop_sequence": None,
-        "usage": {"input_tokens": 10, "output_tokens": 10},
-    }
+def _gemini_msg(data, finish="STOP"):
+    text = data if isinstance(data, str) else json.dumps(data)
+    return {"candidates": [{"content": {"role": "model", "parts": [{"text": text}]}, "finishReason": finish}]}
 
 
-def test_claude_writer_post_request_and_parse(cfg):
+def test_gemini_writer_post_request_and_parse(cfg):
     sent = {}
 
     def handler(request: httpx.Request):
-        sent.update(json.loads(request.content))
-        return httpx.Response(200, json=_tool_msg("entregar_post", {"tema": "fps", "posts": [" Dica 1 ", ""]}))
+        sent["url"] = str(request.url)
+        sent["key"] = request.headers.get("x-goog-api-key")
+        sent["body"] = json.loads(request.content)
+        return httpx.Response(200, json=_gemini_msg({"tema": "fps", "posts": [" Dica 1 ", ""]}))
 
-    w = _claude_with(handler, cfg)
+    w = _gemini_with(handler, cfg)
     d = w.write_post(PostBrief("dicas_fps", "lista", "direto", "numero"))
     assert d.tweets == ["Dica 1"] and d.tema == "fps"
-    assert sent["model"] == cfg.modelo
-    assert sent["tool_choice"] == {"type": "tool", "name": "entregar_post"}
-    assert sent["tools"][0]["name"] == "entregar_post"
-    assert cfg.nicho in sent["system"]
+    assert sent["url"].endswith(f"/models/{cfg.modelo}:generateContent")
+    assert sent["key"] == "k-test"
+    gen = sent["body"]["generationConfig"]
+    assert gen["responseMimeType"] == "application/json"
+    assert gen["responseJsonSchema"]["required"] == ["tema", "posts"]
+    assert gen["responseJsonSchema"]["properties"]["posts"]["maxItems"] == cfg.max_tweets_thread
+    assert "thinking_level" in json.dumps(gen["thinkingConfig"]).lower()
+    assert cfg.nicho in sent["body"]["systemInstruction"]["parts"][0]["text"]
 
 
-def test_claude_writer_reply(cfg):
+def test_gemini_writer_reply_and_ping(cfg):
     def handler(request):
-        return httpx.Response(200, json=_tool_msg("decidir_resposta", {"responder": True, "texto": "Valeu!", "motivo": "ok"}))
+        body = json.loads(request.content)
+        if "responder" in json.dumps(body["generationConfig"]["responseJsonSchema"]):
+            return httpx.Response(200, json=_gemini_msg({"responder": True, "texto": "Valeu!", "motivo": "ok"}))
+        return httpx.Response(200, json=_gemini_msg({"ok": True}))
 
-    d = _claude_with(handler, cfg).write_reply(ReplyBrief("ana", "boa dica", "post original"))
+    w = _gemini_with(handler, cfg)
+    d = w.write_reply(ReplyBrief("ana", "boa dica", "post original"))
     assert d.responder and d.texto == "Valeu!"
+    assert w.ping() == "ok"
+
+
+def test_gemini_empty_answer_explains_why(cfg):
+    def handler(request):
+        return httpx.Response(200, json={"candidates": [{"finishReason": "SAFETY"}]})
+
+    with pytest.raises(RuntimeError, match="não retornou texto"):
+        _gemini_with(handler, cfg).write_post(PostBrief("a", "b", "c", "d"))
+
+
+def test_gemini_http_error_is_raised(cfg):
+    def handler(request):
+        return httpx.Response(429, json={"error": {"code": 429, "message": "quota", "status": "RESOURCE_EXHAUSTED"}})
+
+    from google.genai import errors
+    with pytest.raises(errors.APIError):
+        _gemini_with(handler, cfg).write_post(PostBrief("a", "b", "c", "d"))
+
+
+def test_parse_json_reply_tolerates_markdown_fence():
+    assert parse_json_reply('```json\n{"a": 1}\n```') == {"a": 1}
+    with pytest.raises(ValueError):
+        parse_json_reply("[1, 2]")

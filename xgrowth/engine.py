@@ -203,13 +203,14 @@ class Engine:
         choice, explored = choose_content(self.model(), dims, self.cfg.exploracao, self.rng, avoid=today)
         recent = self._recent_texts()
         brief = PostBrief(pilar=choice["pilar"], formato=choice["formato"], tom=choice["tom"],
-                          gancho=choice["gancho"], recentes=recent, melhores=self._best_texts())
+                          gancho=choice["gancho"], recentes=recent, melhores=self._best_texts(),
+                          dia_de_jogo=row["plan_date"] in self.cfg.dias_de_jogo)
         max_tweets = self.cfg.max_tweets_thread if choice["formato"] == "thread" else 1
         draft, probs = None, ["não gerado"]
         try:
             for _ in range(3):
                 draft = self.writer.write_post(brief)
-                probs = problems_for_post(draft.tweets, max_tweets)
+                probs = problems_for_post(draft.tweets, max_tweets, fatos=self.cfg.fatos)
                 if choice["formato"] == "thread" and len(draft.tweets) < 2:
                     probs.append("thread precisa de pelo menos 2 posts")
                 sim = max_similarity(" ".join(draft.tweets), recent)

@@ -6,8 +6,8 @@ import pytest
 from xgrowth.bandit import FeatureSpace, LinearThompson, Observation, choose_content, choose_hours
 from xgrowth.config import ConfigError, config_from_dict
 from xgrowth.textutil import (matches_opt_out, problems_for_post, problems_for_reply, similarity,
-                              weighted_length)
-from xgrowth.writer import post_tool, system_prompt_post, user_prompt_post, PostBrief
+                              unsupported_facts, weighted_length)
+from xgrowth.writer import post_schema, system_prompt_post, user_prompt_post, PostBrief
 
 
 # ---------------------------------------------------------------- texto
@@ -123,7 +123,7 @@ def test_prompts_carry_profile_and_rules(cfg):
     assert cfg.nicho in sp and "Sem links" in sp and "automatizada" in sp
     up = user_prompt_post(cfg, PostBrief("mitos", "thread", "humor", "numero", recentes=["x"], feedback=["muito longo"]))
     assert "REJEITADA" in up and "entre 3 e" in up
-    assert post_tool(cfg)["input_schema"]["properties"]["posts"]["maxItems"] == cfg.max_tweets_thread
+    assert post_schema(cfg)["properties"]["posts"]["maxItems"] == cfg.max_tweets_thread
 
 
 def test_adaptive_memory_shortens_only_when_audience_changes():
@@ -143,3 +143,48 @@ def test_adaptive_memory_shortens_only_when_audience_changes():
     m, d_shift = fit_adaptive(space, *data(True))
     assert d_stable == 0.97 and d_shift < 0.97
     assert m.effects("formato")[0]["valor"] == "b"
+
+
+# ---------------------------------------------------------------- futebol: fatos, config e dia de jogo
+def test_unsupported_facts_blocks_invented_scores_and_old_years():
+    assert unsupported_facts("Foi 3x1 em 1997") == ["placar 3x1", "ano 1997"]
+    assert unsupported_facts("Foi 3x1 em 1997", ["Cruzeiro 3 x 1 em 1997"]) == [] or \
+        unsupported_facts("Foi 3x1 em 1997", ["Cruzeiro 3x1 em 1997"]) == []
+    assert unsupported_facts("esquema 4-3-3, R$ 1.500 em 2026, jogo às 16h") == []
+    assert any("placar" in p for p in problems_for_post(["Ganhamos de 2 x 0 ontem"], 1))
+    assert problems_for_post(["Ganhamos de 2x0 ontem"], 1, fatos=["O Cruzeiro venceu por 2x0."]) == []
+
+
+def test_cruzeiro_config_is_valid_and_safe_by_default():
+    from pathlib import Path
+    from xgrowth.config import load_config
+    c = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
+    assert "Cruzeiro" in c.nicho and c.dry_run is True and c.modo_respostas == "aprovar"
+    assert c.modelo.startswith("gemini") and len(c.pilares) >= 4
+    assert "numero" not in c.ganchos  # abrir com número convida o modelo a inventar estatística
+    assert all(problems_for_post([e], 1) == [] for e in c.exemplos)
+    sp = system_prompt_post(c)
+    assert "nenhum informado" in sp and "automatizada" in sp
+
+
+def test_context_facts_and_game_days_in_config_and_prompts():
+    cfg = config_from_dict({**BASE, "contexto": {"fatos_atuais": ["Domingo tem jogo no Mineirão."],
+                                                 "dias_de_jogo": ["2026-10-18"]}})
+    assert cfg.dias_de_jogo == {"2026-10-18"}
+    assert "Domingo tem jogo no Mineirão." in system_prompt_post(cfg)
+    up = user_prompt_post(cfg, PostBrief("a", "lista", "humor", "cena", dia_de_jogo=True))
+    assert "dia de jogo" in up
+    with pytest.raises(ConfigError, match="AAAA-MM-DD"):
+        config_from_dict({**BASE, "contexto": {"dias_de_jogo": ["18/10/2026"]}})
+
+
+def test_game_day_control_is_learned_separately_from_hour():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    from xgrowth.learning import controls_for
+    tz = ZoneInfo("America/Sao_Paulo")
+    at = datetime(2026, 10, 18, 19, 0, tzinfo=timezone.utc)  # 16h em São Paulo
+    assert controls_for(at, 100, tz, {"2026-10-18"})["dia_de_jogo"] == 1.0
+    assert controls_for(at, 100, tz)["dia_de_jogo"] == 0.0
+    late = datetime(2026, 10, 19, 1, 0, tzinfo=timezone.utc)  # 22h do dia 18 em SP: ainda é dia de jogo
+    assert controls_for(late, 100, tz, {"2026-10-18"})["dia_de_jogo"] == 1.0

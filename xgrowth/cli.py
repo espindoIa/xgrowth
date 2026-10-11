@@ -24,7 +24,7 @@ from .db import DB, parse_iso
 def _build(args, need_writer: bool = True):
     from .engine import Engine
     from .notifier import NullNotifier, TelegramNotifier
-    from .writer import ClaudeWriter
+    from .writer import GeminiWriter
     from .x_client import DryRunXClient, XClient
 
     cfg = load_config(args.config)
@@ -41,9 +41,9 @@ def _build(args, need_writer: bool = True):
         x = XClient(sec.x_api_key, sec.x_api_secret, sec.x_access_token, sec.x_access_secret)
     writer = None
     if need_writer:
-        if not sec.anthropic_api_key:
-            raise ConfigError("Falta ANTHROPIC_API_KEY (.env ou secrets).")
-        writer = ClaudeWriter(cfg, sec.anthropic_api_key)
+        if not sec.gemini_api_key:
+            raise ConfigError("Falta GEMINI_API_KEY (.env ou secrets). Crie em https://aistudio.google.com/apikey")
+        writer = GeminiWriter(cfg, sec.gemini_api_key)
     notifier = TelegramNotifier(sec.telegram_bot_token, sec.telegram_chat_id, db) if sec.has_telegram else NullNotifier()
     return cfg, db, Engine(cfg, db, x, writer, notifier)
 
@@ -54,11 +54,17 @@ def cmd_verificar(args):
     print(f"config ok: nicho='{cfg.nicho}', {len(cfg.pilares)} pilares, {cfg.posts_por_dia} posts/dia, "
           f"janela {cfg.hora_inicio}h-{cfg.hora_fim}h, posts={cfg.modo_posts}, respostas={cfg.modo_respostas}, "
           f"dry_run={cfg.dry_run}")
-    print(f"chaves: X={'ok' if sec.has_x else 'FALTANDO'}  Anthropic={'ok' if sec.anthropic_api_key else 'FALTANDO'}  "
+    print(f"chaves: X={'ok' if sec.has_x else 'FALTANDO'}  Gemini={'ok' if sec.gemini_api_key else 'FALTANDO'}  "
           f"Telegram={'ok' if sec.has_telegram else 'não configurado'}")
     if (cfg.modo_posts == "aprovar" or cfg.modo_respostas == "aprovar") and not sec.has_telegram:
         print("aviso: há itens que precisam de aprovação e o Telegram não está configurado — "
               "use `python -m xgrowth revisar` no terminal ou configure o Telegram.")
+    if sec.gemini_api_key:
+        from .writer import GeminiWriter
+        try:
+            print(f"Gemini ({cfg.modelo}): {GeminiWriter(cfg, sec.gemini_api_key).ping()}")
+        except Exception as e:  # noqa: BLE001 - qualquer falha aqui é informação para o usuário
+            print(f"Gemini ({cfg.modelo}): FALHOU — {type(e).__name__}: {str(e)[:300]}")
     if sec.has_x:
         from .x_client import XClient
         me = XClient(sec.x_api_key, sec.x_api_secret, sec.x_access_token, sec.x_access_secret).me()

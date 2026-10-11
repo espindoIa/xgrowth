@@ -51,7 +51,28 @@ def is_engagement_bait(text: str) -> bool:
     return bool(_BAIT_RE.search(text))
 
 
-def problems_for_post(tweets: list[str], max_tweets: int, max_len: int = MAX_WEIGHTED) -> list[str]:
+_SCORE_RE = re.compile(r"(?<![\w-])(\d{1,2})\s*[xX×]\s*(\d{1,2})(?![\w-])")
+_YEAR_RE = re.compile(r"(?<!\d)(19[4-9]\d|20[01]\d|202[0-4])(?!\d)")
+
+
+def unsupported_facts(text: str, fatos: list[str] | tuple[str, ...] = ()) -> list[str]:
+    """Placares (2x1) e anos (1997) citados no texto que NÃO aparecem nos fatos informados.
+    É o principal tipo de "fato" que modelos de linguagem inventam em conteúdo esportivo."""
+    known = " ".join(fatos)
+    known_scores = {(a, b) for a, b in _SCORE_RE.findall(known)}
+    out = []
+    for a, b in _SCORE_RE.findall(text):
+        if (a, b) not in known_scores:
+            out.append(f"placar {a}x{b}")
+    known_years = set(_YEAR_RE.findall(known))
+    for y in _YEAR_RE.findall(text):
+        if y not in known_years:
+            out.append(f"ano {y}")
+    return list(dict.fromkeys(out))
+
+
+def problems_for_post(tweets: list[str], max_tweets: int, max_len: int = MAX_WEIGHTED,
+                      fatos: list[str] | tuple[str, ...] = ()) -> list[str]:
     probs: list[str] = []
     if not tweets:
         return ["nenhum post retornado"]
@@ -72,6 +93,8 @@ def problems_for_post(tweets: list[str], max_tweets: int, max_len: int = MAX_WEI
             probs.append(f"post {i} contém @menção (menções não solicitadas são proibidas para contas automatizadas)")
         if is_engagement_bait(t):
             probs.append(f"post {i} pede curtida/RT/follow (engagement bait)")
+        for u in unsupported_facts(t, fatos):
+            probs.append(f"post {i} cita {u}, que não está nos fatos atuais (não invente fatos; fale em termos gerais)")
         total_tags += hashtag_count(t)
     if total_tags > 1:
         probs.append(f"{total_tags} hashtags (máximo 1)")

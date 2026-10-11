@@ -1,6 +1,6 @@
 # xgrowth — perfil no X no piloto automático, com testes que se ajustam sozinhos
 
-Um robô que escreve os posts (com o Claude), escolhe os horários, publica, mede o resultado de cada post 24h depois e usa isso para decidir o próximo: quais temas, formatos, tons, aberturas e horários dão mais views, respostas, compartilhamentos e cliques no perfil. Ele também responde quem interage com o perfil, dentro das regras do X.
+Um robô que escreve os posts (com o Gemini, do Google), escolhe os horários, publica, mede o resultado de cada post 24h depois e usa isso para decidir o próximo: quais temas, formatos, tons, aberturas e horários dão mais views, respostas, compartilhamentos e cliques no perfil. Ele também responde quem interage com o perfil, dentro das regras do X.
 
 Tudo roda sozinho a cada 30 minutos no GitHub Actions (grátis) ou no seu PC. Você só define o nicho e a voz uma vez.
 
@@ -8,11 +8,11 @@ Tudo roda sozinho a cada 30 minutos no GitHub Actions (grátis) ou no seu PC. Vo
 
 O ciclo é: **planejar → escrever → publicar → medir → aprender → repetir**.
 
-Todo dia o robô escolhe os horários (4 por padrão, entre 7h e 23h, com 2h de intervalo). Uma hora antes de cada um, escolhe a combinação de pilar de conteúdo × formato × tom × gancho de abertura e pede o post ao Claude, passando os posts recentes (para não se repetir) e os que mais deram certo (para aprender o estilo que funciona). Cada rascunho passa por uma checagem automática antes de sair: limite de caracteres, sem links, sem @menções, no máximo 1 hashtag, sem "dá like/me siga" e sem ser parecido demais com algo recente. Se falhar, volta para o Claude com o motivo.
+Todo dia o robô escolhe os horários (4 a 5 por dia, conforme o config, entre 7h e 23h, com 2h de intervalo). Uma hora antes de cada um, escolhe a combinação de pilar de conteúdo × formato × tom × gancho de abertura e pede o post ao Gemini, passando os posts recentes (para não se repetir) e os que mais deram certo (para aprender o estilo que funciona). Cada rascunho passa por uma checagem automática antes de sair: limite de caracteres, sem links, sem @menções, no máximo 1 hashtag, sem "dá like/me siga" e sem ser parecido demais com algo recente. Se falhar, volta para o Gemini com o motivo.
 
 Depois de publicado, o robô coleta views, curtidas, respostas, reposts, citações, salvamentos e cliques no perfil. Com 24h, o post vira um dado para o otimizador.
 
-Respostas: quando alguém responde a um post ou menciona o perfil, o Claude escreve uma resposta curta e específica (ou decide não responder spam, provocação ou assunto sensível). Por padrão ela chega no seu Telegram com botões ✅/❌ e sai com um toque. Quem escreve "pare"/"stop" nunca mais recebe resposta automática.
+Respostas: quando alguém responde a um post ou menciona o perfil, o Gemini escreve uma resposta curta e específica (ou decide não responder spam, provocação ou assunto sensível). Por padrão ela chega no seu Telegram com botões ✅/❌ e sai com um toque. Quem escreve "pare"/"stop" nunca mais recebe resposta automática.
 
 Todo dia de manhã chega um resumo no Telegram, e o arquivo `data/relatorio.md` mostra o que o otimizador aprendeu (melhores horários, formatos, pilares, tons, ganchos e posts).
 
@@ -22,17 +22,25 @@ Nada disso é limitação técnica: é o que faz uma conta ser suspensa. Pelas [
 
 Também evitamos o que o próprio algoritmo pune: o código aberto do ranking do X ([xai-org/x-algorithm](https://github.com/xai-org/x-algorithm)) mostra que bloqueios, "não tenho interesse" e denúncias derrubam a visibilidade da conta, então o prompt proíbe polêmica gratuita e ataques. Links ficam de fora porque custam 13× mais na API e costumam reduzir o alcance.
 
+## Perfil de torcedor do Cruzeiro (o `config.yaml` deste repositório)
+
+O `config.yaml` já vem preenchido para uma conta de torcedor do Cruzeiro: seis pilares (dia de jogo, vida de cruzeirense, rivalidade saudável, opinião de arquibancada, memória afetiva e enquete da Nação), formatos de futebol (zoeira, enquete A ou B, cenário, lista, thread), tons e aberturas próprios. Troque os `exemplos_de_posts` pelos seus assim que puder.
+
+O maior risco de uma conta de futebol automatizada é o modelo **inventar fato**: placar, ano de título, escalação, contratação. Por isso há três travas. O Gemini só pode afirmar o que estiver em `contexto.fatos_atuais`. Qualquer rascunho que cite um placar (como "3x1") ou um ano passado (como "1997") que não esteja nesses fatos é rejeitado e reescrito. E o gancho "abrir com um número" ficou de fora do catálogo. Sem fatos informados, o robô fala de emoção, opinião e cenários de torcedor, que é onde ele não erra. Para comentar o jogo da rodada, escreva um ou dois fatos verdadeiros em `fatos_atuais` (dá para editar o arquivo pelo app do GitHub).
+
+Em `contexto.dias_de_jogo` você lista as datas dos jogos (AAAA-MM-DD). Dia de jogo muda o tamanho do público, e sem essa informação o otimizador confundiria o efeito do jogo com o do horário ou do formato. Numa simulação em que o jogo triplicava as views e os horários não importavam, o modelo sem o calendário "descobriu" horários bons que não existiam; com o calendário, os efeitos de horário caíram para praticamente zero (dispersão de 0,03 contra 0,65). A bio deve dizer que a conta é de torcedor, **não oficial**, e automatizada.
+
 ## Passo a passo
 
-**1. Crie a conta no X (manual).** Nome, foto, capa e uma bio que diga que é automatizada, por exemplo: *"Dicas de PC gamer todo dia · conta automatizada gerenciada por @seuperfil"*. Depois ative o rótulo de conta automatizada nas configurações da conta (seção de informações da conta → Automação) e vincule ao seu perfil pessoal, que é obrigatório.
+**1. Crie a conta no X (manual).** Nome, foto, capa e uma bio que diga que é automatizada, por exemplo: *"Torcedor do Cruzeiro · conta não oficial e automatizada · gerenciada por @seuperfil"*. Depois ative o rótulo de conta automatizada nas configurações da conta (seção de informações da conta → Automação) e vincule ao seu perfil pessoal, que é obrigatório.
 
-**2. Crie o acesso à API.** Entre em [console.x.com](https://console.x.com) **logado na conta do robô** (assim a leitura das próprias métricas custa US$ 0,001 por post em vez de US$ 0,005). Crie um app, em *User authentication settings* marque **Read and Write**, e só então gere *API Key/Secret* e *Access Token/Secret* (tokens gerados antes da permissão ficam só leitura). Compre créditos (US$ 10 duram cerca de um mês) e defina um limite de gasto.
+**2. Crie o acesso à API.** Entre em [console.x.com](https://console.x.com) **logado na conta do robô** (assim a leitura das próprias métricas custa US$ 0,001 por post em vez de US$ 0,005). Crie um app, em *User authentication settings* marque **Read and Write**, e só então gere *API Key/Secret* e *Access Token/Secret* (tokens gerados antes da permissão ficam só leitura). Não existe plano gratuito da API do X: ela é paga por uso, sem mensalidade (ao salvar o primeiro cartão, o X dá US$ 20 em créditos). Compre créditos e defina um limite de gasto.
 
-**3. Chave do Claude.** Crie em [console.anthropic.com](https://console.anthropic.com).
+**3. Chave do Gemini.** Crie em [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Os modelos Flash têm camada gratuita, que para este uso (poucas chamadas por dia) costuma bastar. Na camada gratuita o Google pode usar o conteúdo enviado para melhorar os produtos dele; se isso incomodar (por exemplo, com respostas ligadas, que enviam o texto de quem te menciona), ative o faturamento no projeto do AI Studio.
 
 **4. Telegram (opcional, recomendado).** No Telegram, fale com o @BotFather, use `/newbot` e guarde o token. Mande `/start` para o seu bot novo e rode `python -m xgrowth telegram-id` para descobrir o `TELEGRAM_CHAT_ID`. O robô só aceita cliques vindos desse chat.
 
-**5. Configure.** Copie `config.example.yaml` para `config.yaml` e edite o nicho, o público, a voz e os pilares. Colar de 3 a 10 posts de exemplo da voz que você quer em `exemplos_de_posts` faz muita diferença. Copie `.env.example` para `.env` e preencha as chaves.
+**5. Configure.** O `config.yaml` do Cruzeiro já está pronto; para outro nicho, copie `config.example.yaml` e edite nicho, público, voz e pilares. Colar de 3 a 10 posts de exemplo da voz que você quer em `exemplos_de_posts` faz muita diferença. Copie `.env.example` para `.env` e preencha as chaves.
 
 **6. Teste sem publicar.** Com `seguranca.dry_run: true` (padrão):
 
@@ -51,7 +59,7 @@ Prefere o seu PC? `python -m xgrowth daemon --intervalo 10` com `agenda.interval
 
 ## Como a otimização funciona
 
-Cada post é uma combinação de cinco escolhas: pilar, formato (opinião curta, pergunta, lista, thread, cenário, comparação, mito vs. fato), tom, gancho de abertura e horário. Depois de 24h, ele ganha uma pontuação: `log(views) + log(engajamento ponderado)`, em que resposta vale 3, repost e citação 4, salvamento 2, curtida 1 e clique no perfil 5 (é o melhor indicador de novo seguidor). O log impede que um post viral isolado distorça tudo.
+Cada post é uma combinação de cinco escolhas: pilar, formato (no config do Cruzeiro: opinião curta, pergunta, enquete A ou B, cenário, lista, zoeira, thread), tom, gancho de abertura e horário. Depois de 24h, ele ganha uma pontuação: `log(views) + log(engajamento ponderado)`, em que resposta vale 3, repost e citação 4, salvamento 2, curtida 1 e clique no perfil 5 (é o melhor indicador de novo seguidor). O log impede que um post viral isolado distorça tudo.
 
 Uma regressão bayesiana estima quanto cada escolha soma ou tira da pontuação, descontando o efeito de a conta estar crescendo e de ser fim de semana. Em vez de um teste A/B que divide o tráfego igualmente até o fim, o robô usa **Thompson Sampling**: sorteia uma hipótese plausível a partir do que já sabe e age como se ela fosse verdade. No começo, quando tudo é incerto, isso testa de tudo; conforme os dados chegam, ele concentra os posts no que funciona sem parar de testar o resto. Dados antigos perdem peso (meia-vida de ~23 dias), e se os posts recentes começarem a contrariar o que o modelo sabia, a memória encurta sozinha para se readaptar mais rápido.
 
@@ -72,11 +80,11 @@ Simulação não é o mundo real: ela mostra que o otimizador encontra o que fun
 
 ## Custos (outubro de 2026)
 
-API do X (pay-per-use, [preços oficiais](https://docs.x.com/x-api/getting-started/pricing)): US$ 0,015 por post ou resposta, US$ 0,20 se tiver link, US$ 0,001 por post lido da própria conta. Com 4 posts por dia (algumas threads) e cerca de 10 respostas, fica perto de **US$ 8 a 10 por mês**. O X dá US$ 20 em créditos ao salvar o primeiro cartão.
+**API do X:** não há plano gratuito; é pago por uso ([preços oficiais](https://docs.x.com/x-api/getting-started/pricing)): US$ 0,015 por post ou resposta, US$ 0,20 se tiver link (por isso o robô não usa links), US$ 0,001 por post lido da própria conta. Cinco posts por dia custam cerca de US$ 2,25 por mês; com as respostas ligadas e as leituras, o total fica perto de **US$ 8 a 10 por mês**, e o X dá US$ 20 em créditos ao salvar o primeiro cartão. É o único custo obrigatório.
 
-Claude: poucas chamadas curtas por dia; confira o preço atual no console da Anthropic. Para gastar menos, use `claude-haiku-5-5` em `llm.modelo`.
+**Gemini:** o `gemini-3.8-flash` (padrão) e o `gemini-3.5-flash-lite` (mais barato) têm camada gratuita; fora dela, o preço por milhão de tokens está na [página oficial](https://ai.google.dev/gemini-api/docs/pricing). Com algumas chamadas curtas por dia, o gasto é de centavos. O nível de raciocínio (`llm.raciocinio`) vem em "low" para economizar.
 
-GitHub Actions: cerca de 1.440 minutos por mês, dentro dos 2.000 gratuitos de repositórios privados.
+**GitHub Actions:** cerca de 1.440 minutos por mês. Repositório privado tem 2.000 minutos grátis; repositório público não tem limite, mas deixa o estado e o config visíveis para todos.
 
 ## Comandos
 
@@ -103,9 +111,9 @@ Conta nova começa com alcance baixo: quase ninguém a segue, e boa parte da dis
 xgrowth/engine.py     o ciclo: plano, rascunhos, publicação, métricas, respostas, relatório
 xgrowth/bandit.py     regressão bayesiana + Thompson Sampling + memória adaptativa
 xgrowth/learning.py   métricas → pontuação → observações
-xgrowth/writer.py     prompts e chamadas ao Claude
+xgrowth/writer.py     prompts e chamadas ao Gemini
 xgrowth/x_client.py   API v2 do X (e um cliente falso para o dry-run)
 xgrowth/notifier.py   Telegram: aprovações e resumo diário
 xgrowth/sim.py        simulação de público
-tests/                30 testes (pytest), incluindo semanas simuladas de operação
+tests/                38 testes (pytest), incluindo semanas simuladas de operação
 ```
