@@ -188,3 +188,21 @@ def test_game_day_control_is_learned_separately_from_hour():
     assert controls_for(at, 100, tz)["dia_de_jogo"] == 0.0
     late = datetime(2026, 10, 19, 1, 0, tzinfo=timezone.utc)  # 22h do dia 18 em SP: ainda é dia de jogo
     assert controls_for(late, 100, tz, {"2026-10-18"})["dia_de_jogo"] == 1.0
+
+
+def test_requer_fatos_config_and_prompt_rules():
+    cfg = config_from_dict({"perfil": {"nicho": "n"}, "pilares": [
+        {"id": "a", "descricao": "A"}, {"id": "b", "descricao": "B"},
+        {"id": "critica", "descricao": "C", "requer_fatos": True}]})
+    assert cfg.pilares_requer_fatos == {"critica"}
+    with pytest.raises(ConfigError, match="sem 'requer_fatos'"):
+        config_from_dict({"perfil": {"nicho": "n"}, "pilares": [
+            {"id": "a", "descricao": "A"}, {"id": "b", "descricao": "B", "requer_fatos": True},
+            {"id": "c", "descricao": "C", "requer_fatos": True}]})
+    sp = system_prompt_post(cfg, ["Perdemos em casa."])
+    assert "Perdemos em casa." in sp and "nunca a pessoa" in sp and "crime, corrupção" in sp
+    assert "não critique nem elogie" in system_prompt_post(cfg, [])
+    from xgrowth.config import load_config
+    from pathlib import Path
+    real = load_config(Path(__file__).resolve().parents[1] / "config.yaml")
+    assert real.pilares_requer_fatos == {"cobranca_ao_clube"}

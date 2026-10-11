@@ -64,16 +64,37 @@ class TelegramNotifier:
             {"text": "❌ Ignorar", "callback_data": f"r:{mention_id}:no"},
         ]])
 
+    def _command(self, msg: dict) -> tuple[str, str, str] | None:
+        if str((msg.get("chat") or {}).get("id")) != self.chat_id:
+            return None  # só o dono do bot pode alimentar o robô
+        text = (msg.get("text") or "").strip()
+        head, _, rest = text.partition(" ")
+        head = head.split("@", 1)[0].lower()  # "/fato@meubot" -> "/fato"
+        rest = rest.strip()
+        if head == "/fato" and rest:
+            return ("f", rest[:300], "add")
+        if head == "/fatos":
+            return ("f", "", "list")
+        if head == "/esquecer":
+            return ("f", "", "clear")
+        return None
+
     def poll(self) -> list[tuple[str, str, str]]:
-        """Retorna [(tipo 'p'|'r', referência, 'ok'|'no')] dos cliques novos do chat autorizado."""
+        """Retorna [(tipo, referência, ação)] do chat autorizado:
+        cliques 'p'/'r' + 'ok'/'no', e comandos de texto 'f' (/fato, /fatos, /esquecer) + 'add'/'list'/'clear'."""
         offset = self.db.get("tg_offset")
-        params = {"timeout": 0, "allowed_updates": ["callback_query"]}
+        params = {"timeout": 0, "allowed_updates": ["callback_query", "message"]}
         if offset is not None:
             params["offset"] = offset
         updates = self._call("getUpdates", **params)
         decisions = []
         for u in updates:
             offset = u["update_id"] + 1
+            if u.get("message"):
+                cmd = self._command(u["message"])
+                if cmd:
+                    decisions.append(cmd)
+                continue
             cq = u.get("callback_query")
             if not cq:
                 continue

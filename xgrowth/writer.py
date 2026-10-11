@@ -18,6 +18,7 @@ class PostBrief:
     melhores: list[str] = field(default_factory=list)
     feedback: list[str] = field(default_factory=list)
     dia_de_jogo: bool = False
+    fatos: list[str] | None = None   # None = usa os fatos fixos do config
 
 
 @dataclass
@@ -31,6 +32,7 @@ class ReplyBrief:
     autor: str
     mensagem: str
     post_original: str | None
+    fatos: list[str] | None = None
 
 
 @dataclass
@@ -43,15 +45,17 @@ class ReplyDecision:
 # ---------------------------------------------------------------------------
 # Prompts (funções puras, testáveis)
 # ---------------------------------------------------------------------------
-def _fatos_block(cfg: Config) -> str:
-    if cfg.fatos:
-        linhas = "\n".join(f"- {f}" for f in cfg.fatos)
+def _fatos_block(cfg: Config, fatos: list[str] | None = None) -> str:
+    fatos = cfg.fatos if fatos is None else fatos
+    if fatos:
+        linhas = "\n".join(f"- {f}" for f in fatos)
         return (f"FATOS ATUAIS (única fonte de informações concretas que você pode afirmar)\n{linhas}")
     return ("FATOS ATUAIS\n- (nenhum informado: não afirme nada concreto sobre resultados, placares, datas, "
-            "escalações, contratações, estatísticas ou títulos; fale de emoção, opinião e cenários)")
+            "escalações, contratações, estatísticas ou títulos; não critique nem elogie o desempenho do time, da "
+            "comissão técnica ou da diretoria atuais; fale de emoção, opinião e cenários)")
 
 
-def system_prompt_post(cfg: Config) -> str:
+def system_prompt_post(cfg: Config, fatos: list[str] | None = None) -> str:
     evitar = "\n".join(f"- {e}" for e in cfg.evitar) or "- (nada específico)"
     exemplos = "\n".join(f"- {e}" for e in cfg.exemplos) or "- (nenhum)"
     return f"""Você escreve os posts de um perfil no X (antigo Twitter).
@@ -65,7 +69,7 @@ PERFIL
 EXEMPLOS DA VOZ IDEAL (referência de estilo, não copie)
 {exemplos}
 
-{_fatos_block(cfg)}
+{_fatos_block(cfg, fatos)}
 
 REGRAS INEGOCIÁVEIS
 - Cada post tem no máximo 270 caracteres.
@@ -74,6 +78,7 @@ REGRAS INEGOCIÁVEIS
 - Não invente dados, preços, estatísticas, placares, datas, citações ou notícias. Só afirme um fato concreto se ele estiver em FATOS ATUAIS acima. Na dúvida, escreva sem o número ou o nome.
 - O perfil é identificado como conta automatizada: não finja ser humano nem relate experiências pessoais que não aconteceram. Use cenários ("quem nunca...", "situação comum: ...").
 - Opinião forte e provocação são bem-vindas quando a voz do perfil pede, mas sempre com argumento ou sacada. Provoque ideias, atitudes, situações e rivalidades entre clubes; nunca pessoas pelo que elas são (origem, cor, gênero, orientação, aparência, religião, deficiência), nem com ofensa pessoal ou incentivo à violência. Posts que geram bloqueios, "não tenho interesse" e denúncias derrubam o alcance da conta inteira no algoritmo do X.
+- Crítica a pessoas reais (jogadores, técnico, dirigentes) é permitida quando há fato em FATOS ATUAIS que a sustente: critique a decisão, a atuação ou a gestão (o que foi feito), nunca a pessoa. Não acuse ninguém de crime, corrupção ou má-fé, não fale da vida pessoal e não invente o que alguém disse ou fez.
 - A primeira linha precisa prender a atenção sozinha (ela decide se a pessoa para de rolar o feed).
 - Escreva como alguém do nicho escreveria no X: natural, específico, sem clichê de marketing, sem emojis em excesso.
 
@@ -124,12 +129,12 @@ def post_schema(cfg: Config) -> dict:
     }
 
 
-def system_prompt_reply(cfg: Config) -> str:
+def system_prompt_reply(cfg: Config, fatos: list[str] | None = None) -> str:
     return f"""Você responde, em nome de um perfil do X sobre "{cfg.nicho}", a pessoas que interagiram com ele primeiro (responderam a um post ou mencionaram o perfil). O perfil é identificado como conta automatizada.
 
 Voz do perfil: {cfg.voz}
 
-{_fatos_block(cfg)}
+{_fatos_block(cfg, fatos)}
 
 REGRAS
 - Uma resposta curta (até 240 caracteres), específica ao que a pessoa disse, útil ou simpática.
@@ -218,12 +223,12 @@ class GeminiWriter:
         return "ok" if out.get("ok") else "resposta inesperada"
 
     def write_post(self, brief: PostBrief) -> PostDraft:
-        out = self._json(system_prompt_post(self.cfg), user_prompt_post(self.cfg, brief), post_schema(self.cfg))
+        out = self._json(system_prompt_post(self.cfg, brief.fatos), user_prompt_post(self.cfg, brief), post_schema(self.cfg))
         tweets = [str(t).strip() for t in out.get("posts", []) if str(t).strip()]
         return PostDraft(tema=str(out.get("tema", "")).strip(), tweets=tweets)
 
     def write_reply(self, brief: ReplyBrief) -> ReplyDecision:
-        out = self._json(system_prompt_reply(self.cfg), user_prompt_reply(brief), REPLY_SCHEMA, max_tokens=1024)
+        out = self._json(system_prompt_reply(self.cfg, brief.fatos), user_prompt_reply(brief), REPLY_SCHEMA, max_tokens=1024)
         return ReplyDecision(
             responder=bool(out.get("responder")),
             texto=str(out.get("texto", "")).strip(),

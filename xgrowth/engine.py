@@ -106,7 +106,32 @@ class Engine:
         return f"@{info['username']}: {info['followers']} seguidores"
 
     # ------------------------------------------------------------------ 2. aprovações
+    # ---- fatos do dia (config + comandos /fato do Telegram) -------------------
+    def fatos_vigentes(self) -> list[str]:
+        """Fatos fixos do config + os enviados por /fato que ainda não expiraram."""
+        limit = self.now() - timedelta(days=self.cfg.validade_fatos_dias)
+        extra = [f["texto"] for f in (self.db.get("fatos_extra") or []) if parse_iso(f["em"]) >= limit]
+        return list(self.cfg.fatos) + extra
+
+    def _fact_command(self, text: str, action: str) -> str:
+        now = self.now()
+        limit = now - timedelta(days=self.cfg.validade_fatos_dias)
+        keep = [f for f in (self.db.get("fatos_extra") or []) if parse_iso(f["em"]) >= limit]
+        if action == "add":
+            keep = (keep + [{"em": iso(now), "texto": text}])[-12:]
+            self.db.set("fatos_extra", keep)
+            return (f"✅ Fato anotado (vale por {self.cfg.validade_fatos_dias} dias): {text}\n"
+                    "Ele entra nos próximos rascunhos. Só afirme o que for verdade: o robô vai tratar como certo.")
+        if action == "clear":
+            self.db.set("fatos_extra", [])
+            return "🧹 Fatos enviados por você foram apagados (os do config.yaml continuam)."
+        self.db.set("fatos_extra", keep)
+        atuais = self.fatos_vigentes()
+        return "Fatos em uso:\n" + ("\n".join(f"- {f}" for f in atuais) if atuais else "(nenhum)")
+
     def decide(self, kind: str, ref: str, decision: str) -> str:
+        if kind == "f":
+            return self._fact_command(ref, decision)
         ok = decision == "ok"
         if kind == "p":
             row = self.db.one("SELECT status FROM posts WHERE id=?", int(ref))
@@ -121,7 +146,12 @@ class Engine:
         return f"{kind}:{ref} ignorado (já decidido ou inexistente)"
 
     def _process_approvals(self):
-        msgs = [self.decide(k, r, d) for k, r, d in self.notifier.poll()]
+        msgs = []
+        for k, r, d in self.notifier.poll():
+            msg = self.decide(k, r, d)
+            msgs.append(msg)
+            if k == "f" and self.notifier.enabled:
+                self.notifier.send(msg)
         sent = self._send_approved_replies()
         return {"decisoes": msgs, "respostas_enviadas": sent}
 
@@ -198,19 +228,22 @@ class Engine:
 
     def _draft(self, row) -> str:
         dims = {k: v for k, v in self.cfg.dimensoes().items() if k != "hora"}
+        fatos = self.fatos_vigentes()
+        if not fatos:  # pilares de crítica/atualidade só entram em campo com fato que os sustente
+            dims["pilar"] = [p for p in dims["pilar"] if p not in self.cfg.pilares_requer_fatos]
         today = [{"pilar": r["pillar"], "formato": r["format"]} for r in
                  self.db.q("SELECT pillar, format FROM posts WHERE plan_date=? AND pillar IS NOT NULL", row["plan_date"])]
         choice, explored = choose_content(self.model(), dims, self.cfg.exploracao, self.rng, avoid=today)
         recent = self._recent_texts()
         brief = PostBrief(pilar=choice["pilar"], formato=choice["formato"], tom=choice["tom"],
                           gancho=choice["gancho"], recentes=recent, melhores=self._best_texts(),
-                          dia_de_jogo=row["plan_date"] in self.cfg.dias_de_jogo)
+                          dia_de_jogo=row["plan_date"] in self.cfg.dias_de_jogo, fatos=fatos)
         max_tweets = self.cfg.max_tweets_thread if choice["formato"] == "thread" else 1
         draft, probs = None, ["não gerado"]
         try:
             for _ in range(3):
                 draft = self.writer.write_post(brief)
-                probs = problems_for_post(draft.tweets, max_tweets, fatos=self.cfg.fatos)
+                probs = problems_for_post(draft.tweets, max_tweets, fatos=fatos)
                 if choice["formato"] == "thread" and len(draft.tweets) < 2:
                     probs.append("thread precisa de pelo menos 2 posts")
                 sim = max_similarity(" ".join(draft.tweets), recent)
@@ -389,7 +422,8 @@ class Engine:
                 context = " / ".join(json.loads(p["tweets"]))
         try:
             dec = self.writer.write_reply(ReplyBrief(autor=m["author_username"] or "usuario",
-                                                     mensagem=m["text"], post_original=context))
+                                                     mensagem=m["text"], post_original=context,
+                                                     fatos=self.fatos_vigentes()))
         except Exception as e:
             return f"{tid}: erro ao escrever ({e}); tenta no próximo ciclo"
         if not dec.responder:

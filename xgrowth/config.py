@@ -59,6 +59,7 @@ class Config:
     evitar: list[str] = field(default_factory=list)
     exemplos: list[str] = field(default_factory=list)
     pilares: dict[str, str] = field(default_factory=dict)
+    pilares_requer_fatos: set[str] = field(default_factory=set)  # só entram em campo quando há FATOS ATUAIS
     formatos: dict[str, str] = field(default_factory=lambda: dict(FORMATOS_PADRAO))
     tons: dict[str, str] = field(default_factory=lambda: dict(TONS_PADRAO))
     ganchos: dict[str, str] = field(default_factory=lambda: dict(GANCHOS_PADRAO))
@@ -95,6 +96,7 @@ class Config:
     # contexto do dia (opcional): fatos que o texto PODE afirmar e datas de jogo
     fatos: list[str] = field(default_factory=list)
     dias_de_jogo: set[str] = field(default_factory=set)   # "AAAA-MM-DD" no fuso da agenda
+    validade_fatos_dias: int = 3      # fatos enviados pelo Telegram (/fato) expiram depois disso
     # segurança
     dry_run: bool = True
     pausado: bool = False
@@ -174,6 +176,8 @@ def config_from_dict(raw: dict) -> Config:
         evitar=list(perfil.get("evitar") or []),
         exemplos=list(perfil.get("exemplos_de_posts") or []),
         pilares=pilares,
+        pilares_requer_fatos={str(it["id"]) for it in (raw.get("pilares") or [])
+                              if isinstance(it, dict) and it.get("requer_fatos")},
         formatos=_as_named(raw.get("formatos"), FORMATOS_PADRAO),
         tons=_as_named(raw.get("tons"), TONS_PADRAO),
         ganchos=_as_named(raw.get("ganchos"), GANCHOS_PADRAO),
@@ -222,6 +226,7 @@ def config_from_dict(raw: dict) -> Config:
     ctx = raw.get("contexto") or {}
     cfg.fatos = [str(f).strip() for f in (ctx.get("fatos_atuais") or []) if str(f).strip()]
     cfg.dias_de_jogo = {_iso_date(d) for d in (ctx.get("dias_de_jogo") or [])}
+    cfg.validade_fatos_dias = int(ctx.get("validade_dias_fatos", cfg.validade_fatos_dias))
 
     se = raw.get("seguranca") or {}
     cfg.dry_run = bool(se.get("dry_run", cfg.dry_run))
@@ -240,6 +245,11 @@ def validate(cfg: Config) -> None:
         raise ConfigError("agenda.janela_horas deve ser [inicio, fim] com 0 <= inicio < fim <= 24.")
     if not 1 <= cfg.intervalo_ciclo_min <= 50:
         raise ConfigError("agenda.intervalo_ciclo_min deve estar entre 1 e 50.")
+    livres = [p for p in cfg.pilares if p not in cfg.pilares_requer_fatos]
+    if len(livres) < 2:
+        raise ConfigError("Deixe pelo menos 2 pilares sem 'requer_fatos': sem fatos informados só eles podem ser usados.")
+    if cfg.validade_fatos_dias < 1:
+        raise ConfigError("contexto.validade_dias_fatos deve ser >= 1.")
     if cfg.posts_por_dia < 1:
         raise ConfigError("agenda.posts_por_dia deve ser >= 1.")
     if cfg.posts_por_dia > cfg.max_posts_dia_absoluto:

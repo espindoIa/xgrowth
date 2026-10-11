@@ -28,6 +28,8 @@ O `config.yaml` já vem preenchido para uma conta de torcedor do Cruzeiro **opin
 
 A provocação mira **ideias, atitudes e a rivalidade entre clubes, nunca pessoas pelo que elas são**, e isso é uma regra de sobrevivência da conta, não só de educação: bloqueios, "não tenho interesse" e denúncias derrubam o alcance do perfil inteiro, e ataque a origem, cor, orientação ou aparência pode suspender a conta. Um limite que o robô não enxerga: a API não informa quantos bloqueios e denúncias cada post gerou. Como respostas e citações valem muito na pontuação, o otimizador pode passar a preferir posts que irritam em vez de posts que convencem. Fique de olho no relatório e, se a conta perder seguidores enquanto as views sobem, suavize o tom ou use `posts.modo: aprovar` por uns dias.
 
+**Crítica ao time e à diretoria.** O pilar `cobranca_ao_clube` cobra o time, a comissão técnica e os dirigentes, e também reconhece quando merecem. Para o robô saber *quando* é necessário, ele só entra em campo se existir um fato recente que sustente a crítica; sem fato, ele nunca critica nem elogia o clube atual (inventar uma crise inexistente seria o pior erro possível). Você alimenta isso pelo Telegram, do celular: mande `/fato O Cruzeiro perdeu em casa e o técnico manteve o mesmo time.` e o fato passa a valer nos próximos rascunhos (a leitura acontece a cada ciclo de 30 minutos e o fato vale por 3 dias; `/fatos` lista o que está em uso e `/esquecer` apaga). Só o chat configurado em `TELEGRAM_CHAT_ID` pode enviar fatos. Cuide para só enviar o que for verdade: o robô trata o fato como certo e constrói a opinião em cima dele. A crítica é sempre à decisão, à atuação ou à gestão, nunca à pessoa, sem acusar ninguém de crime, corrupção ou má-fé.
+
 O maior risco de uma conta de futebol automatizada é o modelo **inventar fato**: placar, ano de título, escalação, contratação. Por isso há três travas. O Gemini só pode afirmar o que estiver em `contexto.fatos_atuais`. Qualquer rascunho que cite um placar (como "3x1") ou um ano passado (como "1997") que não esteja nesses fatos é rejeitado e reescrito. E o gancho "abrir com um número" ficou de fora do catálogo. Sem fatos informados, o robô fala de emoção, opinião e cenários de torcedor, que é onde ele não erra. Para comentar o jogo da rodada, escreva um ou dois fatos verdadeiros em `fatos_atuais` (dá para editar o arquivo pelo app do GitHub).
 
 Em `contexto.dias_de_jogo` você lista as datas dos jogos (AAAA-MM-DD). Dia de jogo muda o tamanho do público, e sem essa informação o otimizador confundiria o efeito do jogo com o do horário ou do formato. Numa simulação em que o jogo triplicava as views e os horários não importavam, o modelo sem o calendário "descobriu" horários bons que não existiam; com o calendário, os efeitos de horário caíram para praticamente zero (dispersão de 0,03 contra 0,65). A bio deve dizer que a conta é de torcedor, **não oficial**, e automatizada.
@@ -100,6 +102,8 @@ python -m xgrowth relatorio     o que o otimizador aprendeu
 python -m xgrowth simular       simulação de público
 python -m xgrowth telegram-id   descobre o TELEGRAM_CHAT_ID
 ```
+
+No Telegram (só no chat autorizado): `/fato <texto>` informa um fato verdadeiro para os próximos posts, `/fatos` lista os fatos em uso, `/esquecer` apaga os que você enviou.
 
 Botão de pânico: `seguranca.pausado: true` no config (o robô não faz mais nada até você voltar para `false`). Outros limites: `max_posts_por_dia_absoluto`, `respostas.max_por_dia`, `respostas.max_por_usuario_por_dia`.
 

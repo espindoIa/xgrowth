@@ -259,3 +259,50 @@ def test_invented_score_is_rejected_and_game_day_reaches_prompt(make_engine, clo
     assert all("3x1" not in p["text"] for p in eng.x.published)
     assert any("placar 3x1" in f for b in w.post_calls for f in b.feedback)
     assert all(b.dia_de_jogo for b in w.post_calls)
+
+
+# ---------------------------------------------------------------- fatos e crítica ao clube
+def _critic_cfg_overrides():
+    return dict(pilares={"a": "A", "b": "B", "cobranca": "crítica ao clube"}, pilares_requer_fatos={"cobranca"})
+
+
+def test_fact_gated_pillar_needs_facts(make_engine, clock):
+    eng = make_engine(**_critic_cfg_overrides())
+    run_ticks(eng, clock, 24 * 3)
+    assert {r["pillar"] for r in posted(eng)} <= {"a", "b"}  # sem fato, nunca critica
+
+    eng2 = make_engine(fatos=["O Cruzeiro perdeu em casa e o técnico manteve o mesmo time."], **_critic_cfg_overrides())
+    run_ticks(eng2, clock, 24 * 4)
+    assert "cobranca" in {r["pillar"] for r in posted(eng2)}
+    assert all("manteve o mesmo time" in " ".join(b.fatos) for b in eng2.writer.post_calls)
+
+
+def test_telegram_fato_command_feeds_and_expires(make_engine, clock, cfg):
+    eng = make_engine(**_critic_cfg_overrides())
+    sent = []
+    updates = [
+        {"update_id": 1, "message": {"chat": {"id": 666}, "text": "/fato intruso diz que o time ganhou"}},
+        {"update_id": 2, "message": {"chat": {"id": 123}, "text": "/fato@meubot O técnico foi demitido hoje."}},
+        {"update_id": 3, "message": {"chat": {"id": 123}, "text": "bom dia"}},
+    ]
+    tg = TelegramNotifier("TOKEN", "123", eng.db, session=FakeTelegram(updates))
+    tg.send = lambda text, buttons=None: sent.append(text)
+    eng.notifier = tg
+    eng.tick()
+    assert eng.fatos_vigentes() == ["O técnico foi demitido hoje."]  # só o dono do bot alimenta o robô
+    assert sent and "Fato anotado" in sent[0]
+    clock.advance(days=cfg.validade_fatos_dias + 1)
+    assert eng.fatos_vigentes() == []  # fato velho não vira verdade eterna
+    eng.decide("f", "Outro fato", "add")
+    assert eng.fatos_vigentes() == ["Outro fato"]
+    eng.decide("f", "", "clear")
+    assert eng.fatos_vigentes() == []
+
+
+def test_commands_parse(make_engine, clock):
+    eng = make_engine()
+    tg = TelegramNotifier("T", "123", eng.db, session=FakeTelegram([]))
+    assert tg._command({"chat": {"id": 123}, "text": "/fatos"}) == ("f", "", "list")
+    assert tg._command({"chat": {"id": 123}, "text": "/esquecer"}) == ("f", "", "clear")
+    assert tg._command({"chat": {"id": 123}, "text": "/fato"}) is None  # sem texto
+    assert tg._command({"chat": {"id": 1}, "text": "/fatos"}) is None
