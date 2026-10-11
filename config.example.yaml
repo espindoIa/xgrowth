@@ -1,0 +1,77 @@
+# Copie para config.yaml e ajuste. Tudo aqui é editável sem mexer no código.
+
+perfil:
+  nicho: "PC gamer: otimização, hardware e custo-benefício"
+  publico: "gamers brasileiros de PC, 18 a 35 anos, que querem mais desempenho gastando pouco"
+  voz: "direto, bem-humorado, técnico sem ser chato; fala como alguém do nicho que entende do assunto"
+  idioma: "pt-BR"
+  evitar:
+    - "política e religião"
+    - "ataques a marcas, criadores ou pessoas"
+    - "preços e benchmarks específicos sem fonte"
+  # Opcional, mas ajuda muito: 3 a 10 posts que representam a voz que você quer.
+  exemplos_de_posts: []
+
+# Pilares de conteúdo. O otimizador descobre quais performam melhor e passa a usá-los mais.
+pilares:
+  - id: dicas_fps
+    descricao: "dicas práticas para ganhar FPS e reduzir input lag"
+  - id: custo_beneficio
+    descricao: "escolhas de peças e upgrades com melhor custo-benefício"
+  - id: mitos
+    descricao: "mitos comuns de PC gamer desmentidos"
+  - id: setup
+    descricao: "setup, periféricos, conforto, jogar na TV/sofá"
+
+# Opcional: restringir ou criar formatos/tons/ganchos. Sem estas chaves, usa todos os padrões:
+# formatos: [opiniao_curta, pergunta, lista, thread, cenario, comparacao, mito_vs_fato]
+# tons: [direto, humor, didatico, provocativo]
+# ganchos: [numero, contraintuitivo, pergunta, afirmacao_forte]
+
+agenda:
+  fuso: "America/Sao_Paulo"
+  posts_por_dia: 4
+  janela_horas: [7, 23]          # horários candidatos: das 7h às 22h59
+  espacamento_min_horas: 2
+  tolerancia_atraso_min: 90      # se o ciclo atrasar mais que isso, o post do horário é pulado
+  intervalo_ciclo_min: 30        # de quanto em quanto tempo o agendador roda (GitHub Actions: 30)
+
+otimizador:
+  horizonte_recompensa_horas: 24 # um post é avaliado 24h depois de publicado
+  exploracao_forcada: 0.03       # % de escolhas totalmente aleatórias (além da exploração do Thompson)
+  desconto_diario: auto          # dados antigos perdem peso (meia-vida ~23 dias); encurta sozinho se o público mudar
+  escala_amostragem: 0.35
+  peso_views: 1.0                # quanto valem as views na pontuação
+  peso_engajamento: 1.0          # quanto vale o engajamento ponderado na pontuação
+  pesos_acoes:                   # peso de cada ação no engajamento
+    likes: 1
+    bookmarks: 2
+    replies: 3
+    reposts: 4
+    quotes: 4
+    profile_clicks: 5            # clique no perfil é o melhor indicador de novo seguidor
+
+posts:
+  modo: "auto"                   # auto | aprovar (aprovar = cada post passa pelo seu OK no Telegram)
+  antecedencia_rascunho_horas: 1
+  antecedencia_aprovacao_horas: 12
+  permitir_threads: true
+  max_posts_por_thread: 5
+
+respostas:
+  # off     = não responde
+  # aprovar = a IA escreve, você aprova com um toque no Telegram (padrão)
+  # auto    = responde sozinho; exige aprovação prévia do X para respostas por IA
+  modo: "aprovar"
+  tenho_aprovacao_do_x_para_respostas_ia: false
+  max_por_dia: 30
+  max_por_usuario_por_dia: 2
+
+llm:
+  modelo: "claude-sonnet-5-5"    # ou claude-haiku-5-5 para gastar menos
+
+seguranca:
+  dry_run: true                  # comece em true; mude para false quando o teste estiver bom
+  pausado: false                 # true = o robô não faz nada (botão de pânico)
+  max_posts_por_dia_absoluto: 12
+  arquivo_estado: "data/estado.db"

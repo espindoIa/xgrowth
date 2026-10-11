@@ -1,0 +1,66 @@
+name: xgrowth
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"   # a cada 30 min (minutos "quebrados" sofrem menos atraso no GitHub)
+  workflow_dispatch: {}       # botão "Run workflow" para rodar na hora
+
+permissions:
+  contents: write             # para salvar o estado no branch "estado"
+
+concurrency:
+  group: xgrowth
+  cancel-in-progress: false   # nunca dois ciclos ao mesmo tempo
+
+jobs:
+  ciclo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Restaurar estado
+        run: |
+          if git ls-remote --exit-code --heads origin estado >/dev/null 2>&1; then
+            git fetch -q --depth=1 origin estado
+            git checkout FETCH_HEAD -- data/
+            echo "estado restaurado"
+          else
+            echo "primeira execução: sem estado anterior"
+          fi
+
+      - name: Ciclo do robô
+        env:
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m xgrowth tick
+
+      # O estado (banco SQLite + relatorio.md) fica num branch separado, sobrescrito a cada ciclo,
+      # para o repositório não crescer. Veja o relatório em: branch "estado" > data/relatorio.md
+      - name: Salvar estado
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [ -d data ] || exit 0
+          dir="$RUNNER_TEMP/estado"
+          rm -rf "$dir" && mkdir -p "$dir" && cp -r data "$dir/"
+          cd "$dir"
+          git init -q -b estado
+          git add data
+          git -c user.name="xgrowth-bot" -c user.email="xgrowth-bot@users.noreply.github.com" \
+            commit -qm "estado $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -qf "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" estado
